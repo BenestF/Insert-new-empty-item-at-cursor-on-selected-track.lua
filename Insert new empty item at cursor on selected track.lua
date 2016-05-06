@@ -25,19 +25,10 @@
 
 ----------------------------------------------------------------------------------
 -- variables definition
-item_UNSELECT_ALL_ITEMS = 40289
-loop_points_SET_START_POINT = 40222
-loop_points_SET_END_POINT = 40223
-loop_points_REMOVE_LOOP_POINT_SELECTION = 40634
-MOVE_EDIT_CURSOR_FORWARD_ONE_MEASURE = 41042
-INSERT_EMPTY_ITEM = 40142
-action_WAIT_100MS_BEFORE_NEXT_ACTION = 2009
-
 itemSize = 1
 
 selTracks = reaper.CountSelectedTracks(0) 
 selItems = reaper.CountSelectedMediaItems(0)
-position = reaper.GetCursorPosition()
 
 window = {width = 300, height = 240, title = "New items creation", font = "Arial"}
 display = {ox = 0, oy = 0, width = 50, height = 50, fontsize = 50}
@@ -46,9 +37,70 @@ slider = {ox = 0, oy = 0, width = 250, height = 30}
 cursor = {ox = 0, oy = 0, width = 20, height = 50, min = 1, max = 50}
 interval = {horizontal = 0, vertical = 0}
 mouse = {ox = 0, oy = 0, cursorclick = false, btnOKclick = false, step = slider.width / cursor.max}
+---------------------------------------------------------------------------------
+-- ************
+-- * X-RAYM's * 
+-- ************
+function CreateTextItem(track, position, length, text, color)
+    
+  local item = reaper.AddMediaItemToTrack(track)
+  
+  reaper.SetMediaItemInfo_Value(item, "D_POSITION", position)
+  reaper.SetMediaItemInfo_Value(item, "D_LENGTH", length)
+  
+  if text then
+    reaper.ULT_SetMediaItemNote(item, text)
+  end
+  if color then
+    reaper.SetMediaItemInfo_Value(item, "I_CUSTOMCOLOR", color)
+  end
+  return item
+end
+
+function GetPlayOrEditCursorPos()
+  local play_state = reaper.GetPlayState()
+  local cursor_pos
+  if play_state == 1 then
+    cursor_pos = reaper.GetPlayPosition()
+  else
+    cursor_pos = reaper.GetCursorPosition()
+  end
+  return cursor_pos
+end
+
+-- *********************
+-- * X-RAYM's modified * 
+-- *********************
+function GetMeasureLength(measure_begin) -- from edit cursor or play position
+  local retval, measures, cml, fullbeats, cdenom = reaper.TimeMap2_timeToBeats(0, measure_begin)
+  local current_measure = reaper.TimeMap2_beatsToTime(0, fullbeats)
+  local next_measure = reaper.TimeMap2_beatsToTime(0, fullbeats + cml)
+  return next_measure - current_measure
+end
+
+-- ****************
+-- * X-RAYM's end * 
+-- ****************
 
 -----------------------------------------------------------------------
-function init_window()
+function CreateItemOnEachTrack()
+  local length = 0
+  local cursor_pos = GetPlayOrEditCursorPos()
+  -- defines creation zone limits
+  for i = 0, itemSize - 1 do
+    length = length + GetMeasureLength(cursor_pos)
+    cursor_pos = cursor_pos + length
+  end
+  
+  -- create an item on each track
+  for i = 0 , selTracks - 1 do
+    track = reaper.GetSelectedTrack(0, i)
+    CreateTextItem(track, position, length)
+  end
+end
+
+-----------------------------------------------------------------------
+function InitWindow()
 -- init values
   interval.horizontal = (window.width - display.width - btnOK.width) / 3
   interval.vertical = (window.height - display.height - slider.height) / 3
@@ -66,12 +118,12 @@ function init_window()
   
 -- window creation
   gfx.init(window.title, window.width, window.height)
-  update_value()
+  UpdateGUI()
 end
 
 ------------------------------------------------------------------------------------
 -- update item size value
-function update_value()
+function UpdateGUI()
   -- slider creation
   gfx.set(1, 0, 0, 0.8)
   gfx.rect(slider.ox, slider.oy, slider.width, slider.height, false)
@@ -103,19 +155,20 @@ end
 
 ------------------------------------------------------------------------------------
 -- manages mouse
-function main()
-
+function Main()
+  --aa = GetCurrentMeasureLength()
+  
   -- mouse cursor on OK button ?
-  if check_mouse_cursor(btnOK.ox, btnOK.oy, btnOK.width, btnOK.height) == true then
+  if CheckMouseCursor(btnOK.ox, btnOK.oy, btnOK.width, btnOK.height) == true then
     if (gfx.mouse_cap & 1 == 1) and (mouse.cursorclick == false) then
       mouse.btnOKclick = true 
-      create_Empty_Item()
+      CreateItemOnEachTrack()
       reaper.atexit(gfx.quit)
     end   
   end
    
   -- mouse cursor on slider cursor ?
-  if check_mouse_cursor(cursor.ox, cursor.oy, cursor.width, cursor.height) == true then
+  if CheckMouseCursor(cursor.ox, cursor.oy, cursor.width, cursor.height) == true then
     if gfx.mouse_cap & 1 == 1 then
       if mouse.cursorclick == false then 
         mouse.cursorclick = true 
@@ -142,18 +195,18 @@ function main()
     end
     itemSize = math.floor(((cursor.ox - slider.ox) / mouse.step) + 1)
   end
-  update_value() 
+  UpdateGUI() 
 
   --resultat = reaper.ShowMessageBox("click", "", 0)
   gfx.update()
   if mouse.btnOKclick == false then
-    reaper.defer(main) 
+    reaper.defer(Main) 
   end
   
 end
 
 -- checks if mouse cursor is inside limits
-function check_mouse_cursor(ox, oy, width, height)
+function CheckMouseCursor(ox, oy, width, height)
     --resultat = reaper.ShowMessageBox("runloop", "", 0)
   local retour = false
   if gfx.mouse_x >= ox and gfx.mouse_x <= (ox + width) then
@@ -163,31 +216,9 @@ function check_mouse_cursor(ox, oy, width, height)
   end
   return retour
 end
-------------------------------------------------------------------------------------
--- creates empty item(s) from the actual cursor position on the selected track(s) 
-function create_Empty_Item()
-  if selTracks > 0 then
-
-    if selItems > 0 then
-      reaper.Main_OnCommandEx(item_UNSELECT_ALL_ITEMS, 0)
-    end
-
-    reaper.Main_OnCommandEx(loop_points_SET_START_POINT, 0)
-  
-    for i = 1, itemSize do
-      reaper.Main_OnCommandEx(MOVE_EDIT_CURSOR_FORWARD_ONE_MEASURE, 0)
-      reaper.Main_OnCommandEx(action_WAIT_100MS_BEFORE_NEXT_ACTION, 0)
-    end
-    reaper.Main_OnCommandEx(loop_points_SET_END_POINT, 0)
-    reaper.Main_OnCommandEx(INSERT_EMPTY_ITEM, 0)
-    reaper.Main_OnCommandEx(loop_points_REMOVE_LOOP_POINT_SELECTION, 0)
-
-  else
-    a = reaper.ShowMessageBox("No item will be created for there's no track selection.", "Track selection error", 0)
-  end
-end
 
 -----------------------------------------------------------------------
-init_window()
-main()
+InitWindow()
+position = GetPlayOrEditCursorPos()
+Main()
 -----------------------------------------------------------------------
